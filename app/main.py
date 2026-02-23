@@ -7,15 +7,17 @@ from sqlalchemy.orm import Session
 from app.services.speech_agent import SpeechAgent
 from app.services.priority_agent import PriorityAgent
 from app.services.resource_agent import ResourceAgent
+from app.services.notification_agent import NotificationAgent # ADDED
 from app.database import engine, get_db
 from app import models
 
-app = FastAPI(title="ResQNet - High-Speed AI Dispatch")
+app = FastAPI(title="ResQNet - High-Speed AI Dispatch & Voice Alert")
 
 # Initialize Agents
 speech_agent = SpeechAgent()
-priority_agent = PriorityAgent() # Now using Gemini 1.5 Flash
+priority_agent = PriorityAgent() 
 resource_agent = ResourceAgent()
+notification_agent = NotificationAgent() # ADDED
 
 # Create tables in MySQL on startup
 models.Base.metadata.create_all(bind=engine)
@@ -32,12 +34,6 @@ async def process_emergency_call(
     file: UploadFile = File(...), 
     db: Session = Depends(get_db)
 ):
-    """
-    Workflow: 
-    1. Audio -> Text 
-    2. Text -> Gemini (Multi-Incident Triage)
-    3. Loop through Incidents -> Sequential MySQL Dispatch
-    """
     if not file.content_type.startswith("audio/"):
         raise HTTPException(status_code=400, detail="Please upload a valid audio file.")
 
@@ -54,50 +50,54 @@ async def process_emergency_call(
             raise HTTPException(status_code=400, detail="Transcription failed.")
 
         # 3. Agent 2: AI Priority & Triage (Gemini)
-        # Returns a list of incidents prioritized by rank
         ai_result = priority_agent.analyze_text(transcript)
+        severity = ai_result.get("overall_severity", "Moderate")
         
-        # 4. Save the main Alert record to DB
+        # ---------------------------------------------------------
+        # 4. TRIGGER VOICE CALL (The "Calling Thingy")
+        # ---------------------------------------------------------
+        call_status = "Not Triggered (Non-Critical)"
+        if severity == "Critical":
+            doctor_phone = os.getenv("DOCTOR_PHONE_NUMBER")
+            # This triggers the Twilio call
+            success = notification_agent.make_emergency_call(
+                to_number=doctor_phone,
+                doctor_name="Esha",
+                incident_summary=ai_result.get("final_reasoning")
+            )
+            call_status = "Call Success" if success else "Call Failed"
+        # ---------------------------------------------------------
+
+        # 5. Save the main Alert record to DB
         new_alert = models.Alert(
             message=transcript,
-            severity=ai_result.get("overall_severity", "Moderate"),
+            severity=severity,
             priority="Multi-Incident"
         )
         db.add(new_alert)
         db.commit()
         db.refresh(new_alert)
         
-        # 5. Agent 3: Sequential Dispatching
-        # We loop through each incident the AI identified (e.g., Rescue first, then Evac)
+        # 6. Agent 3: Sequential Dispatching
         dispatch_summary = []
-        
         for incident in ai_result.get("incidents", []):
             incident_actions = {
                 "incident": incident.get("incident_name"),
                 "rank": incident.get("priority_rank"),
-                "reasoning": incident.get("reasoning"),
                 "dispatch_results": []
             }
-            
-            # Allocate resources for this specific incident
             for res in incident.get("resources", []):
-                status = resource_agent.allocate(
-                    db, 
-                    new_alert.id, 
-                    res.get("type"), 
-                    res.get("qty", 0)
-                )
+                status = resource_agent.allocate(db, new_alert.id, res.get("type"), res.get("qty", 0))
                 incident_actions["dispatch_results"].append(status)
-            
             dispatch_summary.append(incident_actions)
         
-        # 6. Return response to the "page" (Browser/Postman)
         return {
             "status": "success",
             "alert_id": new_alert.id,
             "transcript": transcript,
+            "call_status": call_status, # Let's you see if the call worked
             "triage_logic": {
-                "overall_severity": ai_result.get("overall_severity"),
+                "overall_severity": severity,
                 "triage_summary": ai_result.get("final_reasoning")
             },
             "prioritized_dispatch": dispatch_summary
@@ -111,8 +111,6 @@ async def process_emergency_call(
     finally:
         if os.path.exists(file_path):
             os.remove(file_path)
-
-# --- Fleet Monitoring ---
 
 @app.get("/inventory")
 def view_inventory(db: Session = Depends(get_db)):
