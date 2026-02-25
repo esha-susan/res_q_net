@@ -13,22 +13,24 @@ class NotificationAgent:
         if all([self.account_sid, self.auth_token, self.from_number]):
             self.client = Client(self.account_sid, self.auth_token)
         else:
-            print("CRITICAL ERROR: Twilio credentials missing in .env file!")
+            print("CRITICAL ERROR: Twilio credentials missing!")
 
-    def make_emergency_call(self, to_number, doctor_name, incident_summary):
+    def make_emergency_call(self, to_number, doctor_name, incident_summary, alert_id):
         try:
-            # Clean the text to ensure no special characters break the XML
-            clean_summary = str(incident_summary).replace('"', '').replace("'", "")
+            # REPLACE THIS URL with your ngrok URL
+            base_url = "https://deann-equicontinuous-unpractically.ngrok-free.dev"
+            callback_url = f"{base_url}/twilio-callback?alert_id={alert_id}"
             
-            # TwiML script with a 2-second pause for the Trial Account 'Press a key' prompt
             twiml_content = f"""<?xml version="1.0" encoding="UTF-8"?>
             <Response>
                 <Pause length="2"/>
-                <Say voice="Polly.Amy" language="en-GB">
-                    Attention Doctor {doctor_name}. This is an automated Res-Q-Net emergency alert.
-                    Incident details: {clean_summary}.
-                    Please respond immediately.
-                </Say>
+                <Gather input="speech" action="{callback_url}" method="POST" speechTimeout="auto">
+                    <Say voice="Polly.Amy" language="en-GB">
+                        Attention Doctor {doctor_name}. Emergency detected: {incident_summary}. 
+                        Do you confirm the dispatch of requested resources? Please say 'Yes' or 'No'.
+                    </Say>
+                </Gather>
+                <Say voice="Polly.Amy">We did not hear a response. The request will remain pending. Goodbye.</Say>
             </Response>"""
 
             call = self.client.calls.create(
@@ -36,7 +38,7 @@ class NotificationAgent:
                 to=to_number,
                 from_=self.from_number
             )
-            print(f"Twilio Call Triggered! SID: {call.sid}")
+            print(f"Interactive Call Triggered! SID: {call.sid}")
             return True
         except Exception as e:
             print(f"Twilio API Error: {e}")
