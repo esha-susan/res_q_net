@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ResQNet Emergency Map</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+    <style>
+        body { margin: 0; }
+        #map { height: 100vh; }
+    </style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+<script>
+    const map = L.map('map').setView([10.0, 76.3], 8);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
+
+    fetch("http://127.0.0.1:8000/alerts-map")
+        .then(response => response.json())
+        .then(data => {
+            console.log("Alert Data:", data);
+
+            data.forEach(alert => {
+                let markerColor = "blue";
+
+                if (alert.severity === "Critical") markerColor = "red";
+                else if (alert.severity === "Moderate") markerColor = "orange";
+                else markerColor = "green";
+
+                const marker = L.circleMarker(
+                    [alert.latitude, alert.longitude],
+                    {
+                        color: markerColor,
+                        radius: 10,
+                        fillOpacity: 0.8
+                    }
+                ).addTo(map);
+
+                marker.bindPopup(`
+                    <b>Severity:</b> ${alert.severity}<br>
+                    <b>Message:</b> ${alert.message}
+                `);
+            });
+        })
+        .catch(error => console.error("Error loading alerts:", error));
+</script>
+
+</body>
+</html>

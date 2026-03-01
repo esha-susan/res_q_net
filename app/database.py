@@ -4,7 +4,7 @@ from sqlalchemy.orm import sessionmaker
 
 # Replace 'your_password' with your local MySQL password
 # Ensure you have created the database 'resqnet_db' in MySQL first
-SQLALCHEMY_DATABASE_URL = "mysql+mysqlconnector://root:taesha123@localhost/resqnet_db"
+SQLALCHEMY_DATABASE_URL = "mysql+mysqlconnector://root:root123@localhost/resqnet_db"
 
 engine = create_engine(SQLALCHEMY_DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
